@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <link
+    rel="icon"
+    type="image/svg+xml"
+    href="/vite.svg"
+  />
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+  />
+  <title>Vite App</title>
+</head>
+
+<body>
+  <div id="app">
+
+    <video
+      id="cam"
+      autoplay
+      playsinline
+      style="display:none"
+    ></video>
+    <canvas
+      id="src"
+      style="display:none"
+    ></canvas>
+
+    <!-- overlay where we draw the 2-D route -->
+    <svg
+      id="route"
+      viewBox="-5 -5 10 10"
+      width="300"
+      height="300"
+      style="background:#111;border:1px solid #555"
+    ></svg>
+
+  </div>
+
+
+
+
+  <script
+    type="module"
+    src="/src/main.js"
+  ></script>
+</body>
+
+</html>
