@@ -1,6 +1,7 @@
 import './style.css'
 
 import { AlvaAR } from './alva_ar.js';
+import { IMU } from './imu.js';
 
 const video = document.getElementById('cam');
 const canvas = document.getElementById('src');
@@ -8,6 +9,7 @@ const ctx = canvas.getContext('2d');
 const svg = document.getElementById('route');
 let polyline;                 // <polyline> element
 const pts = [];               // 2-D points we collect
+let imu;                      // IMU instance
 
 // 1. grab camera stream ------------------------------------------------------
 const stream = await navigator.mediaDevices.getUserMedia({
@@ -19,14 +21,30 @@ await video.play();           // wait for metadata
 canvas.width = video.videoWidth;
 canvas.height = video.videoHeight;
 
-// 2. init SLAM ---------------------------------------------------------------
+// 2. init IMU ----------------------------------------------------------------
+try {
+  imu = await IMU.Initialize();
+  console.log('IMU initialized successfully');
+} catch (error) {
+  console.warn('IMU not available:', error);
+  imu = null;
+}
+
+// 3. init SLAM ---------------------------------------------------------------
 const slam = await AlvaAR.Initialize(canvas.width, canvas.height);
 
-// 3. render loop -------------------------------------------------------------
+// 4. render loop -------------------------------------------------------------
 function tick() {
   ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
   const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  const pose = slam.Tick(img.data.buffer);   // 4×4 column-major float32
+
+  // Use IMU data if available, otherwise fall back to SLAM-only
+  let pose;
+  if (imu) {
+    pose = slam.findCameraPoseWithIMU(img, imu.orientation, imu.motion);
+  } else {
+    pose = slam.Tick(img.data.buffer);   // fallback to SLAM-only
+  }
 
   if (pose) {
     // pose[12], pose[13], pose[14] = X,Y,Z translation (OV²SLAM / ORB conv.)
@@ -42,6 +60,16 @@ function tick() {
       svg.appendChild(polyline);
     }
     polyline.setAttribute('points', pts.join(' '));
+  } else {
+    // When tracking is lost, we could visualize feature points for debugging
+    // Similar to how imu.html shows dots when pose is lost
+    const dots = slam.getFramePoints && slam.getFramePoints();
+    if (dots) {
+      for (const p of dots) {
+        ctx.fillStyle = 'white';
+        ctx.fillRect(p.x, p.y, 2, 2);
+      }
+    }
   }
 
   requestAnimationFrame(tick);
