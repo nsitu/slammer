@@ -1,130 +1,12 @@
 import './modules/polyfillMSTP.js';
 import './style.css'
 
-import { AlvaAR } from './alva_ar.js';
-import { IMU } from './imu.js';
-import { Stats } from './stats.js';
-import { isMobile, isIOS } from './utils.js';
+import { AlvaAR } from './modules/alva_ar.js';
+import { IMU } from './modules/imu.js';
+import { Stats } from './modules/stats.js';
+import { isMobile, isIOS } from './modules/utils.js';
+import { CameraManager } from './modules/camera.js';
 
-
-class CameraManager {
-  constructor() {
-    this.stream = null;
-    this.reader = null;
-    this.videoWidth = 640;
-    this.videoHeight = 480;
-    this.currentFacingMode = 'environment';
-    this.isStreaming = false;
-    this.mstpType = 'unknown'; // Track MSTP implementation type
-  }
-
-  async initialize() {
-    try {
-      console.log('Requesting camera access...');
-
-      // Get user media stream
-      this.stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          width: { ideal: this.videoWidth },
-          height: { ideal: this.videoHeight },
-          facingMode: this.currentFacingMode
-        }
-      });
-
-      console.log('Camera access granted, setting up stream processor...');
-
-      // Detect MSTP implementation type
-      if (globalThis.polyfillingMSTP === true) {
-        this.mstpType = 'polyfill';
-        console.log('Using MediaStreamTrackProcessor polyfill');
-      } else if (window.MediaStreamTrackProcessor) {
-        this.mstpType = 'native';
-        console.log('Using native MediaStreamTrackProcessor');
-      } else {
-        this.mstpType = 'unsupported';
-        throw new Error('MediaStreamTrackProcessor not supported in this browser');
-      }
-
-      // Check if MediaStreamTrackProcessor is supported
-      if (!window.MediaStreamTrackProcessor) {
-        throw new Error('MediaStreamTrackProcessor not supported in this browser');
-      }
-
-      // Get video track and create processor
-      const track = this.stream.getVideoTracks()[0];
-      const processor = new MediaStreamTrackProcessor({ track });
-      this.reader = processor.readable.getReader();
-
-      // Get first frame to determine actual dimensions
-      const { value: firstFrame } = await this.reader.read();
-      this.videoWidth = firstFrame.displayWidth;
-      this.videoHeight = firstFrame.displayHeight;
-
-      console.log(`Camera stream ready: ${this.videoWidth}x${this.videoHeight}`);
-
-      // Close the first frame
-      firstFrame.close();
-
-      return {
-        width: this.videoWidth,
-        height: this.videoHeight,
-        facingMode: this.currentFacingMode,
-        mstpType: this.mstpType
-      };
-    } catch (error) {
-      console.error('Camera initialization failed:', error);
-      throw error;
-    }
-  }
-
-  async *getFrameStream() {
-    this.isStreaming = true;
-    let frameCount = 0;
-    const targetFPS = 30;
-    const frameInterval = Math.floor(30 / targetFPS); // Process every Nth frame
-
-    try {
-      while (this.isStreaming) {
-        const { done, value: frame } = await this.reader.read();
-        if (done) break;
-
-        frameCount++;
-
-        // Process frames at target FPS
-        if (frameCount % frameInterval === 0) {
-          yield frame;
-        } else {
-          frame.close();
-        }
-      }
-    } catch (error) {
-      console.error('Stream processing error:', error);
-    }
-  }
-
-  stop() {
-    this.isStreaming = false;
-
-    // Stop the stream reader
-    if (this.reader) {
-      this.reader.releaseLock();
-      this.reader = null;
-    }
-
-    // Stop video stream
-    if (this.stream) {
-      this.stream.getTracks().forEach(track => track.stop());
-      this.stream = null;
-    }
-  }
-
-  getDimensions() {
-    return {
-      width: this.videoWidth,
-      height: this.videoHeight
-    };
-  }
-}
 
 const svg = document.getElementById('route');
 let polyline;                 // <polyline> element
@@ -304,45 +186,15 @@ function createStartButton() {
   // Create overlay
   const overlay = document.createElement('div');
   overlay.id = 'overlay';
-  overlay.style.cssText = `
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: rgba(0, 0, 0, 0.8);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-direction: column;
-    z-index: 1000;
-    font-family: system-ui, sans-serif;
-    color: white;
-  `;
 
   // Create start button
   startButton = document.createElement('button');
+  startButton.id = 'start-button';
   startButton.textContent = 'Start Tracking';
-  startButton.style.cssText = `
-    background: transparent;
-    border: 2px solid white;
-    border-radius: 8px;
-    color: white;
-    padding: 16px 32px;
-    font-size: 18px;
-    cursor: pointer;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-  `;
 
   // Create instruction text
   const instructions = document.createElement('div');
-  instructions.style.cssText = `
-    margin-top: 20px;
-    text-align: center;
-    color: #ccc;
-    font-size: 14px;
-  `;
+  instructions.id = 'instructions';
 
   if (isIOS()) {
     instructions.innerHTML = 'Please allow access to<br>camera and motion sensors';
@@ -398,12 +250,5 @@ function createStartButton() {
 
 // App startup
 document.addEventListener('DOMContentLoaded', () => {
-  if (isMobile() || isIOS()) {
-    // Show start button for mobile devices
-    createStartButton();
-  } else {
-    // For desktop, start immediately
-    permissionGranted = true;
-    initialize();
-  }
+  createStartButton();
 });
