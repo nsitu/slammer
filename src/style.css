@@ -88,6 +88,16 @@ button:focus-visible {
   outline: 4px auto -webkit-focus-ring-color;
 }
 
+#overlay button:hover {
+  background: rgba(255, 255, 255, 0.1);
+  transform: scale(1.05);
+  transition: all 0.2s ease;
+}
+
+#overlay button:active {
+  transform: scale(0.95);
+}
+
 @media (prefers-color-scheme: light) {
   :root {
     color: #213547;

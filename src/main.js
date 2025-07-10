@@ -4,6 +4,7 @@ import './style.css'
 import { AlvaAR } from './alva_ar.js';
 import { IMU } from './imu.js';
 import { Stats } from './stats.js';
+import { isMobile, isIOS } from './utils.js';
 
 
 class CameraManager {
@@ -120,22 +121,26 @@ let cameraManager;            // Camera manager instance
 // 1. Initialize camera and IMU -----------------------------------------------
 async function initialize() {
   try {
-    // Initialize camera manager
+    console.log('Initializing camera manager...');
     cameraManager = new CameraManager();
     const cameraInfo = await cameraManager.initialize();
 
-    // No need to set canvas dimensions anymore
-
-    // Initialize IMU
+    console.log('Initializing IMU...');
+    // Initialize IMU with permission check
     try {
-      imu = await IMU.Initialize();
-      console.log('IMU initialized successfully');
+      if (!permissionGranted && isIOS()) {
+        console.log('IMU permission not granted yet');
+        imu = null;
+      } else {
+        imu = await IMU.Initialize();
+        console.log('IMU initialized successfully');
+      }
     } catch (error) {
-      console.warn('IMU not available:', error);
+      console.warn('IMU initialization failed:', error);
       imu = null;
     }
 
-    // Initialize SLAM
+    console.log('Initializing SLAM...');
     const slam = await AlvaAR.Initialize(cameraInfo.width, cameraInfo.height);
 
     // Initialize Stats tracking
@@ -147,6 +152,7 @@ async function initialize() {
     // Add stats display to the page
     document.body.appendChild(Stats.el);
 
+    console.log('Starting frame processing...');
     // Start processing
     await processFrames(slam);
 
@@ -274,5 +280,163 @@ function updatePath(pose) {
   polyline.setAttribute('points', pts.map(p => `${p.x},${p.z}`).join(' '));
 }
 
-// Start the application
-initialize();
+// Add this at the top of main.js after the imports
+// import { isMobile, isIOS } from './utils.js';
+
+// Add these variables at the top level
+let permissionGranted = false;
+let startButton = null;
+
+// Add this function to create and handle the start button
+function createStartButton() {
+  // Create overlay
+  const overlay = document.createElement('div');
+  overlay.id = 'overlay';
+  overlay.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.8);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    z-index: 1000;
+    font-family: system-ui, sans-serif;
+    color: white;
+  `;
+
+  // Create start button
+  startButton = document.createElement('button');
+  startButton.textContent = 'Start Tracking';
+  startButton.style.cssText = `
+    background: transparent;
+    border: 2px solid white;
+    border-radius: 8px;
+    color: white;
+    padding: 16px 32px;
+    font-size: 18px;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  `;
+
+  // Create instruction text
+  const instructions = document.createElement('div');
+  instructions.style.cssText = `
+    margin-top: 20px;
+    text-align: center;
+    color: #ccc;
+    font-size: 14px;
+  `;
+  
+  if (isIOS()) {
+    instructions.innerHTML = 'Please allow access to<br>camera and motion sensors';
+  } else {
+    instructions.innerHTML = 'Please allow camera access';
+  }
+
+  overlay.appendChild(startButton);
+  overlay.appendChild(instructions);
+  document.body.appendChild(overlay);
+
+  // Handle button click
+  startButton.addEventListener('click', async () => {
+    try {
+      // Request IMU permission on iOS
+      if (isIOS() && typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+        console.log('Requesting iOS motion permission...');
+        const motionPermission = await DeviceMotionEvent.requestPermission();
+        
+        if (motionPermission !== 'granted') {
+          throw new Error('Motion permission denied');
+        }
+        
+        console.log('iOS motion permission granted');
+      }
+
+      // Request orientation permission on iOS if available
+      if (isIOS() && typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+        console.log('Requesting iOS orientation permission...');
+        const orientationPermission = await DeviceOrientationEvent.requestPermission();
+        
+        if (orientationPermission !== 'granted') {
+          console.log('Orientation permission denied, continuing without...');
+        } else {
+          console.log('iOS orientation permission granted');
+        }
+      }
+
+      permissionGranted = true;
+      overlay.remove();
+      
+      // Now initialize the app
+      await initialize();
+      
+    } catch (error) {
+      console.error('Permission request failed:', error);
+      alert(`Error: ${error.message}`);
+    }
+  });
+
+  return overlay;
+}
+
+// Update the main initialization function
+async function initialize() {
+  try {
+    console.log('Initializing camera manager...');
+    cameraManager = new CameraManager();
+    const cameraInfo = await cameraManager.initialize();
+
+    console.log('Initializing IMU...');
+    // Initialize IMU with permission check
+    try {
+      if (!permissionGranted && isIOS()) {
+        console.log('IMU permission not granted yet');
+        imu = null;
+      } else {
+        imu = await IMU.Initialize();
+        console.log('IMU initialized successfully');
+      }
+    } catch (error) {
+      console.warn('IMU initialization failed:', error);
+      imu = null;
+    }
+
+    console.log('Initializing SLAM...');
+    const slam = await AlvaAR.Initialize(cameraInfo.width, cameraInfo.height);
+
+    // Initialize Stats tracking
+    Stats.add('total');
+    Stats.add('frame');
+    Stats.add('slam');
+    Stats.add('path');
+
+    // Add stats display to the page
+    document.body.appendChild(Stats.el);
+
+    console.log('Starting frame processing...');
+    // Start processing
+    await processFrames(slam);
+
+  } catch (error) {
+    console.error('Initialization failed:', error);
+  }
+}
+
+// Update the app startup
+document.addEventListener('DOMContentLoaded', () => {
+  if (isMobile() || isIOS()) {
+    // Show start button for mobile devices
+    createStartButton();
+  } else {
+    // For desktop, start immediately
+    permissionGranted = true;
+    initialize();
+  }
+});
+
+// Remove any existing window.onload or similar handlers and replace with the above
