@@ -117,6 +117,8 @@ let polyline;                 // <polyline> element
 const pts = [];               // 2-D points we collect (as {x, z} objects)
 let imu;                      // IMU instance
 let cameraManager;            // Camera manager instance
+let permissionGranted = false;
+let startButton = null;
 
 // 1. Initialize camera and IMU -----------------------------------------------
 async function initialize() {
@@ -280,14 +282,7 @@ function updatePath(pose) {
   polyline.setAttribute('points', pts.map(p => `${p.x},${p.z}`).join(' '));
 }
 
-// Add this at the top of main.js after the imports
-// import { isMobile, isIOS } from './utils.js';
-
-// Add these variables at the top level
-let permissionGranted = false;
-let startButton = null;
-
-// Add this function to create and handle the start button
+// iOS Permission handling and startup
 function createStartButton() {
   // Create overlay
   const overlay = document.createElement('div');
@@ -331,7 +326,7 @@ function createStartButton() {
     color: #ccc;
     font-size: 14px;
   `;
-  
+
   if (isIOS()) {
     instructions.innerHTML = 'Please allow access to<br>camera and motion sensors';
   } else {
@@ -349,11 +344,11 @@ function createStartButton() {
       if (isIOS() && typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
         console.log('Requesting iOS motion permission...');
         const motionPermission = await DeviceMotionEvent.requestPermission();
-        
+
         if (motionPermission !== 'granted') {
           throw new Error('Motion permission denied');
         }
-        
+
         console.log('iOS motion permission granted');
       }
 
@@ -361,7 +356,7 @@ function createStartButton() {
       if (isIOS() && typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
         console.log('Requesting iOS orientation permission...');
         const orientationPermission = await DeviceOrientationEvent.requestPermission();
-        
+
         if (orientationPermission !== 'granted') {
           console.log('Orientation permission denied, continuing without...');
         } else {
@@ -371,10 +366,10 @@ function createStartButton() {
 
       permissionGranted = true;
       overlay.remove();
-      
+
       // Now initialize the app
       await initialize();
-      
+
     } catch (error) {
       console.error('Permission request failed:', error);
       alert(`Error: ${error.message}`);
@@ -384,50 +379,7 @@ function createStartButton() {
   return overlay;
 }
 
-// Update the main initialization function
-async function initialize() {
-  try {
-    console.log('Initializing camera manager...');
-    cameraManager = new CameraManager();
-    const cameraInfo = await cameraManager.initialize();
-
-    console.log('Initializing IMU...');
-    // Initialize IMU with permission check
-    try {
-      if (!permissionGranted && isIOS()) {
-        console.log('IMU permission not granted yet');
-        imu = null;
-      } else {
-        imu = await IMU.Initialize();
-        console.log('IMU initialized successfully');
-      }
-    } catch (error) {
-      console.warn('IMU initialization failed:', error);
-      imu = null;
-    }
-
-    console.log('Initializing SLAM...');
-    const slam = await AlvaAR.Initialize(cameraInfo.width, cameraInfo.height);
-
-    // Initialize Stats tracking
-    Stats.add('total');
-    Stats.add('frame');
-    Stats.add('slam');
-    Stats.add('path');
-
-    // Add stats display to the page
-    document.body.appendChild(Stats.el);
-
-    console.log('Starting frame processing...');
-    // Start processing
-    await processFrames(slam);
-
-  } catch (error) {
-    console.error('Initialization failed:', error);
-  }
-}
-
-// Update the app startup
+// App startup
 document.addEventListener('DOMContentLoaded', () => {
   if (isMobile() || isIOS()) {
     // Show start button for mobile devices
@@ -438,5 +390,3 @@ document.addEventListener('DOMContentLoaded', () => {
     initialize();
   }
 });
-
-// Remove any existing window.onload or similar handlers and replace with the above
