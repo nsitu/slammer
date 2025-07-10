@@ -63,19 +63,24 @@ function tick() {
     const viewBoxX = minX - padding;
     const viewBoxY = minZ - padding;
     const viewBoxWidth = maxX - minX + 2 * padding;
-    const viewBoxHeight = maxZ - minZ + 2 * padding;
-
-    // Update SVG viewBox to fit all points
+    const viewBoxHeight = maxZ - minZ + 2 * padding;    // Update SVG viewBox to fit all points
     svg.setAttribute('viewBox', `${viewBoxX} ${viewBoxY} ${viewBoxWidth} ${viewBoxHeight}`);
+
+    // Calculate responsive stroke width based on viewBox size
+    // This ensures the line maintains visual consistency as the view scales
+    const viewBoxDiagonal = Math.sqrt(viewBoxWidth * viewBoxWidth + viewBoxHeight * viewBoxHeight);
+    const strokeWidth = Math.max(0.005, viewBoxDiagonal * 0.003); // 0.3% of diagonal, min 0.005
 
     if (!polyline) {
       polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
       polyline.setAttribute('fill', 'none');
       polyline.setAttribute('stroke', '#0f0');
-      polyline.setAttribute('stroke-width', '0.02');
       svg.appendChild(polyline);
     }
-
+    
+    // Update stroke width dynamically
+    polyline.setAttribute('stroke-width', strokeWidth.toString());
+    
     // Convert points back to string format for polyline
     polyline.setAttribute('points', pts.map(p => `${p.x},${p.z}`).join(' '));
   } else {
