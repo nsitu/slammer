@@ -1,9 +1,10 @@
+
 class CameraManager {
   constructor() {
     this.stream = null;
     this.reader = null;
-    this.videoWidth = null;
-    this.videoHeight = null;
+    this.videoWidth = 320;
+    this.videoHeight = 240;
     this.currentFacingMode = 'environment';
     this.isStreaming = false;
     this.mstpType = 'unknown'; // Track MSTP implementation type
@@ -13,26 +14,14 @@ class CameraManager {
     try {
       console.log('Requesting camera access...');
 
-      // Detect device orientation and adjust constraints
-      const isPortrait = window.innerHeight > window.innerWidth;
-      const constraints = {
-        video: {
-          facingMode: this.currentFacingMode,
-          // Adaptive resolution based on orientation
-          ...(isPortrait ? {
-            width: { ideal: 480 },
-            height: { ideal: 640 }
-          } : {
-            width: { ideal: 640 },
-            height: { ideal: 480 }
-          })
-        }
-      };
-
-      console.log('Camera constraints:', constraints);
-
       // Get user media stream
-      this.stream = await navigator.mediaDevices.getUserMedia(constraints);
+      this.stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          width: { ideal: this.videoWidth },
+          height: { ideal: this.videoHeight },
+          facingMode: this.currentFacingMode
+        }
+      });
 
       console.log('Camera access granted, setting up stream processor...');
 
@@ -125,4 +114,4 @@ class CameraManager {
   }
 }
 
-export { CameraManager }
+export { CameraManager } 
