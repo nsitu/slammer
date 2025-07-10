@@ -1,7 +1,7 @@
 // Polyfill for MediaStreamTrackProcessor (from Jan-Ivar)
 
 if (!globalThis.MediaStreamTrackProcessor) {
-    console.log("Polyfilling MediaStreamTrackProcessor");
+    globalThis.polyfillingMSTP = true;
     globalThis.MediaStreamTrackProcessor = class MediaStreamTrackProcessor {
         constructor({ track }) {
             if (track.kind === "video") {

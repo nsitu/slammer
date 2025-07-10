@@ -34,7 +34,7 @@ class CameraManager {
       console.log('Camera access granted, setting up stream processor...');
 
       // Detect MSTP implementation type
-      if (globalThis.MediaStreamTrackProcessor && globalThis.MediaStreamTrackProcessor.toString().includes('Polyfilling')) {
+      if (globalThis.polyfillingMSTP === true) {
         this.mstpType = 'polyfill';
         console.log('Using MediaStreamTrackProcessor polyfill');
       } else if (window.MediaStreamTrackProcessor) {
