@@ -1,40 +1,9 @@
+import './modules/polyfillMSTP.js';
 import './style.css'
 
 import { AlvaAR } from './alva_ar.js';
 import { IMU } from './imu.js';
 
-// Polyfill for MediaStreamTrackProcessor (from Jan-Ivar)
-if (!globalThis.MediaStreamTrackProcessor) {
-  console.log("Polyfilling MediaStreamTrackProcessor");
-  globalThis.MediaStreamTrackProcessor = class MediaStreamTrackProcessor {
-    constructor({ track }) {
-      if (track.kind === "video") {
-        this.readable = new ReadableStream({
-          async start(controller) {
-            this.video = document.createElement("video");
-            this.video.srcObject = new MediaStream([track]);
-            await Promise.all([
-              this.video.play(),
-              new Promise(r => (this.video.onloadedmetadata = r))
-            ]);
-            this.track = track;
-            this.canvas = new OffscreenCanvas(this.video.videoWidth, this.video.videoHeight);
-            this.ctx = this.canvas.getContext("2d", { desynchronized: true });
-            this.t1 = performance.now();
-          },
-          async pull(controller) {
-            while (performance.now() - this.t1 < 1000 / track.getSettings().frameRate) {
-              await new Promise(r => requestAnimationFrame(r));
-            }
-            this.t1 = performance.now();
-            this.ctx.drawImage(this.video, 0, 0);
-            controller.enqueue(new VideoFrame(this.canvas, { timestamp: this.t1 }));
-          }
-        });
-      }
-    }
-  };
-}
 
 class CameraManager {
   constructor() {
@@ -141,9 +110,6 @@ class CameraManager {
   }
 }
 
-const video = document.getElementById('cam');
-const canvas = document.getElementById('src');
-const ctx = canvas.getContext('2d');
 const svg = document.getElementById('route');
 let polyline;                 // <polyline> element
 const pts = [];               // 2-D points we collect (as {x, z} objects)
@@ -157,9 +123,7 @@ async function initialize() {
     cameraManager = new CameraManager();
     const cameraInfo = await cameraManager.initialize();
 
-    // Set canvas dimensions based on actual camera resolution
-    canvas.width = cameraInfo.width;
-    canvas.height = cameraInfo.height;
+    // No need to set canvas dimensions anymore
 
     // Initialize IMU
     try {
@@ -183,33 +147,24 @@ async function initialize() {
 
 // 2. Process camera frames ---------------------------------------------------
 async function processFrames(slam) {
+
   for await (const frame of cameraManager.getFrameStream()) {
     try {
-      // Draw frame to canvas for visualization (optional)
-      ctx.drawImage(frame, 0, 0, canvas.width, canvas.height);
 
-      // Get ImageData for SLAM processing
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      // Extract image data directly from VideoFrame using copyTo()
+      const imageData = await extractImageDataFromFrame(frame);
+
 
       // Use IMU data if available, otherwise fall back to SLAM-only
       let pose;
       if (imu) {
         pose = slam.findCameraPoseWithIMU(imageData, imu.orientation, imu.motion);
       } else {
-        pose = slam.Tick(imageData.data.buffer);
+        pose = slam.findCameraPose(imageData);
       }
 
       if (pose) {
         updatePath(pose);
-      } else {
-        // When tracking is lost, visualize feature points for debugging
-        const dots = slam.getFramePoints && slam.getFramePoints();
-        if (dots) {
-          for (const p of dots) {
-            ctx.fillStyle = 'white';
-            ctx.fillRect(p.x, p.y, 2, 2);
-          }
-        }
       }
 
       // Close the frame to free memory
@@ -219,6 +174,37 @@ async function processFrames(slam) {
       console.error('Frame processing error:', error);
       frame.close();
     }
+  }
+}
+
+// Helper function to extract ImageData directly from VideoFrame using copyTo()
+async function extractImageDataFromFrame(frame) {
+  // Calculate buffer size for RGBA format (4 bytes per pixel)
+  const bufferSize = frame.displayWidth * frame.displayHeight * 4;
+
+  // Create buffer and copy VideoFrame data directly using copyTo()
+  const buffer = new Uint8Array(bufferSize);
+
+  try {
+    // Copy VideoFrame to buffer with RGBA format
+    await frame.copyTo(buffer, {
+      format: "RGBA",
+      colorSpace: "srgb"
+    });
+    // Create ImageData-like object that AlvaAR expects
+    return {
+      data: buffer,
+      width: frame.displayWidth,
+      height: frame.displayHeight
+    };
+
+  } catch (copyError) {
+    console.error('VideoFrame.copyTo() failed:', copyError);
+    // console.log('Falling back to OffscreenCanvas method...');
+    // const offscreenCanvas = new OffscreenCanvas(frame.displayWidth, frame.displayHeight);
+    // const ctx = offscreenCanvas.getContext('2d');
+    // ctx.drawImage(frame, 0, 0);
+    // return ctx.getImageData(0, 0, frame.displayWidth, frame.displayHeight);
   }
 }
 
