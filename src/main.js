@@ -3,6 +3,7 @@ import './style.css'
 
 import { AlvaAR } from './alva_ar.js';
 import { IMU } from './imu.js';
+import { Stats } from './stats.js';
 
 
 class CameraManager {
@@ -137,6 +138,15 @@ async function initialize() {
     // Initialize SLAM
     const slam = await AlvaAR.Initialize(cameraInfo.width, cameraInfo.height);
 
+    // Initialize Stats tracking
+    Stats.add('total');
+    Stats.add('frame');
+    Stats.add('slam');
+    Stats.add('path');
+
+    // Add stats display to the page
+    document.body.appendChild(Stats.el);
+
     // Start processing
     await processFrames(slam);
 
@@ -150,29 +160,44 @@ async function processFrames(slam) {
 
   for await (const frame of cameraManager.getFrameStream()) {
     try {
+      // Start overall timing
+      Stats.next();
+      Stats.start('total');
 
-      // Extract image data directly from VideoFrame using copyTo()
+      // Time frame extraction
+      Stats.start('frame');
       const imageData = await extractImageDataFromFrame(frame);
+      Stats.stop('frame');
 
-
-      // Use IMU data if available, otherwise fall back to SLAM-only
+      // Time SLAM processing
+      Stats.start('slam');
       let pose;
       if (imu) {
         pose = slam.findCameraPoseWithIMU(imageData, imu.orientation, imu.motion);
       } else {
         pose = slam.findCameraPose(imageData);
       }
+      Stats.stop('slam');
 
+      // Time path updates
       if (pose) {
+        Stats.start('path');
         updatePath(pose);
+        Stats.stop('path');
       }
 
       // Close the frame to free memory
       frame.close();
 
+      // Complete timing and render stats
+      Stats.stop('total');
+      Stats.render();
+
     } catch (error) {
       console.error('Frame processing error:', error);
       frame.close();
+      Stats.stop('total');
+      Stats.render();
     }
   }
 }
