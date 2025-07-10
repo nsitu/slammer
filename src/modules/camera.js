@@ -3,8 +3,8 @@ class CameraManager {
   constructor() {
     this.stream = null;
     this.reader = null;
-    this.videoWidth = 320;
-    this.videoHeight = 240;
+    this.videoWidth = 640;
+    this.videoHeight = 480;
     this.currentFacingMode = 'environment';
     this.isStreaming = false;
     this.mstpType = 'unknown'; // Track MSTP implementation type
