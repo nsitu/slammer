@@ -99,19 +99,16 @@ class IMU {
         return new Promise((resolve, reject) => {
             const finalize = () => {
                 if (window.isSecureContext === false) {
-                    alert("DeviceOrientation is only available in secure contexts (https).");
                     reject("DeviceOrientation is only available in secure contexts (https).");
                     return;
                 }
 
                 if (window.DeviceOrientationEvent === undefined) {
-                    alert("DeviceOrientation not supported.");
                     reject("DeviceOrientation not supported.");
                     return;
                 }
 
                 if (window.DeviceMotionEvent === undefined) {
-                    alert("DeviceMotion not supported.");
                     reject("DeviceMotion not supported.");
                     return;
                 }
@@ -125,7 +122,6 @@ class IMU {
                         finalize();
                     }
                     else {
-                        alert("Permission denied by user.");
                         reject("Permission denied by user.");
                     }
                 }, error => {
@@ -136,7 +132,6 @@ class IMU {
                 finalize();
             }
             else {
-                alert("DeviceMotion is not supported.");
                 reject("DeviceMotion is not supported.");
             }
         });

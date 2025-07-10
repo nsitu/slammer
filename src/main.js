@@ -15,6 +15,7 @@ class CameraManager {
     this.videoHeight = 480;
     this.currentFacingMode = 'environment';
     this.isStreaming = false;
+    this.mstpType = 'unknown'; // Track MSTP implementation type
   }
 
   async initialize() {
@@ -31,6 +32,18 @@ class CameraManager {
       });
 
       console.log('Camera access granted, setting up stream processor...');
+
+      // Detect MSTP implementation type
+      if (globalThis.MediaStreamTrackProcessor && globalThis.MediaStreamTrackProcessor.toString().includes('Polyfilling')) {
+        this.mstpType = 'polyfill';
+        console.log('Using MediaStreamTrackProcessor polyfill');
+      } else if (window.MediaStreamTrackProcessor) {
+        this.mstpType = 'native';
+        console.log('Using native MediaStreamTrackProcessor');
+      } else {
+        this.mstpType = 'unsupported';
+        throw new Error('MediaStreamTrackProcessor not supported in this browser');
+      }
 
       // Check if MediaStreamTrackProcessor is supported
       if (!window.MediaStreamTrackProcessor) {
@@ -55,7 +68,8 @@ class CameraManager {
       return {
         width: this.videoWidth,
         height: this.videoHeight,
-        facingMode: this.currentFacingMode
+        facingMode: this.currentFacingMode,
+        mstpType: this.mstpType
       };
     } catch (error) {
       console.error('Camera initialization failed:', error);
@@ -151,12 +165,15 @@ async function initialize() {
     Stats.add('slam');
     Stats.add('path');
 
+    // Add camera and IMU info to stats display
+    const deviceInfo = `${cameraInfo.width}x${cameraInfo.height} | MSTP: ${cameraInfo.mstpType} | IMU: ${imu ? 'enabled' : 'disabled'}`;
+
     // Add stats display to the page
     document.body.appendChild(Stats.el);
 
     console.log('Starting frame processing...');
-    // Start processing
-    await processFrames(slam);
+    // Start processing - pass the device info for display
+    await processFrames(slam, deviceInfo);
 
   } catch (error) {
     console.error('Initialization failed:', error);
@@ -164,7 +181,7 @@ async function initialize() {
 }
 
 // 2. Process camera frames ---------------------------------------------------
-async function processFrames(slam) {
+async function processFrames(slam, deviceInfo) {
 
   for await (const frame of cameraManager.getFrameStream()) {
     try {
@@ -197,15 +214,15 @@ async function processFrames(slam) {
       // Close the frame to free memory
       frame.close();
 
-      // Complete timing and render stats
+      // Complete timing and render stats with device info
       Stats.stop('total');
-      Stats.render();
+      Stats.render(deviceInfo);
 
     } catch (error) {
       console.error('Frame processing error:', error);
       frame.close();
       Stats.stop('total');
-      Stats.render();
+      Stats.render(deviceInfo);
     }
   }
 }
