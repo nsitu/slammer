@@ -2,8 +2,8 @@ class CameraManager {
   constructor() {
     this.stream = null;
     this.reader = null;
-    this.videoWidth = 640;
-    this.videoHeight = 480;
+    this.videoWidth = null;
+    this.videoHeight = null;
     this.currentFacingMode = 'environment';
     this.isStreaming = false;
     this.mstpType = 'unknown'; // Track MSTP implementation type
@@ -20,8 +20,8 @@ class CameraManager {
           facingMode: this.currentFacingMode,
           // Adaptive resolution based on orientation
           ...(isPortrait ? {
-            width: { ideal: 240 },
-            height: { ideal: 320 }
+            width: { ideal: 480 },
+            height: { ideal: 640 }
           } : {
             width: { ideal: 640 },
             height: { ideal: 480 }
