@@ -1,7 +1,11 @@
 import './modules/polyfillMSTP.js';
 import './style.css'
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 import { AlvaAR } from './modules/alva_ar.js';
+import { AlvaARConnectorTHREE } from './modules/alva_ar_three.js';
+
 import { IMU } from './modules/imu.js';
 import { Stats } from './modules/stats.js';
 import { isMobile, isIOS } from './modules/utils.js';
@@ -10,11 +14,114 @@ import { CameraManager } from './modules/camera.js';
 
 const svg = document.getElementById('route');
 let polyline;                 // <polyline> element
-const pts = [];               // 2-D points we collect (as {x, z} objects)
+const pts = [];               // Now stores THREE.Vector3 objects instead of {x, z}
+const markerPts = [];         // Array to store marker positions for connecting lines
+const markerMeshes = [];      // Array to store marker mesh objects for cleanup
 let imu;                      // IMU instance
 let cameraManager;            // Camera manager instance
 let permissionGranted = false;
 let startButton = null;
+let debugMode = false;        // Toggle for orbit controls vs AR mode
+
+// Add this function before initialize()
+function initializeThreeJS(width, height) {
+  // Create scene
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x000000);
+
+  // Create camera with AR-appropriate settings
+  const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.01, 1000);
+
+  // Create or get canvas element
+  let canvas = document.getElementById('three-canvas');
+  if (!canvas) {
+    canvas = document.createElement('canvas');
+    canvas.id = 'three-canvas';
+    canvas.style.cssText = 'position: absolute; top: 0; left: 0; z-index: 1; width: 100%; height: 100%;';
+    document.body.appendChild(canvas);
+  }
+
+  // Get actual viewport dimensions
+  const viewportWidth = window.innerWidth;
+  const viewportHeight = window.innerHeight;
+
+  // Create renderer
+  const renderer = new THREE.WebGLRenderer({
+    canvas: canvas,
+    antialias: true,
+    alpha: true
+  });
+
+  // Set renderer size to fill viewport, not camera resolution
+  renderer.setSize(viewportWidth, viewportHeight);
+  renderer.setPixelRatio(window.devicePixelRatio);
+
+  // Update camera aspect ratio to match viewport
+  camera.aspect = viewportWidth / viewportHeight;
+  camera.updateProjectionMatrix();
+
+  // Initialize pose application function
+  const applyPose = AlvaARConnectorTHREE.Initialize(THREE);
+
+  // Create line geometry for path visualization
+  const pathGeometry = new THREE.BufferGeometry();
+  const pathMaterial = new THREE.LineBasicMaterial({
+    color: 0x00ff00,
+    linewidth: 3
+  });
+  const pathLine = new THREE.Line(pathGeometry, pathMaterial);
+  scene.add(pathLine);
+
+  // Add some basic lighting
+  const ambientLight = new THREE.AmbientLight(0x404040, 0.6);
+  scene.add(ambientLight);
+
+  const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+  directionalLight.position.set(1, 1, 1);
+  scene.add(directionalLight);
+
+  // Add orbit controls for debugging (optional)
+  const controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.05;
+  controls.enableZoom = true;
+  controls.enablePan = true;
+  controls.enableRotate = true;
+
+  // Set initial camera position for better view in debug mode
+  camera.position.set(0, 2, 5);
+  controls.target.set(0, 0, 0);
+  controls.update();
+
+  // Create group for marker connections (cylinders)
+  const markerConnections = new THREE.Group();
+  scene.add(markerConnections);
+
+  // Handle window resize
+  function handleResize() {
+    const newWidth = window.innerWidth;
+    const newHeight = window.innerHeight;
+
+    // Update camera aspect ratio
+    camera.aspect = newWidth / newHeight;
+    camera.updateProjectionMatrix();
+
+    // Update renderer size
+    renderer.setSize(newWidth, newHeight);
+    renderer.setPixelRatio(window.devicePixelRatio);
+  }
+
+  // Add resize event listener
+  window.addEventListener('resize', handleResize);
+
+  // Also handle orientation change for mobile devices
+  window.addEventListener('orientationchange', () => {
+    // Small delay to ensure the viewport dimensions have updated
+    setTimeout(handleResize, 100);
+  });
+
+  return { scene, camera, renderer, applyPose, pathLine, controls, markerConnections };
+}
 
 // 1. Initialize camera and IMU -----------------------------------------------
 async function initialize() {
@@ -41,6 +148,8 @@ async function initialize() {
     console.log(`Initializing SLAM... with width ${cameraInfo.width}, height ${cameraInfo.height}`);
     const slam = await AlvaAR.Initialize(cameraInfo.width, cameraInfo.height);
 
+    // Initialize Three.js scene
+    const { scene, camera, renderer, applyPose, pathLine, controls, markerConnections } = initializeThreeJS(cameraInfo.width, cameraInfo.height);
 
     // Initialize Stats tracking
     Stats.add('total');
@@ -56,7 +165,7 @@ async function initialize() {
     document.body.appendChild(Stats.el);
 
     console.log('Starting frame processing...');
-    await processFrames(slam, deviceInfo);
+    await processFrames(slam, { scene, camera, renderer, applyPose, pathLine, controls, markerConnections }, deviceInfo);
 
   } catch (error) {
     console.error('Initialization failed:', error);
@@ -64,7 +173,8 @@ async function initialize() {
 }
 
 // 2. Process camera frames ---------------------------------------------------
-async function processFrames(slam, deviceInfo) {
+async function processFrames(slam, threeJsObjects, deviceInfo) {
+  const { scene, camera, renderer, applyPose, pathLine, controls, markerConnections } = threeJsObjects;
   let frameProcessedCount = 0;
   let poseFoundCount = 0;
   let nonZeroPoseCount = 0;
@@ -120,7 +230,19 @@ async function processFrames(slam, deviceInfo) {
         }
 
         Stats.start('path');
-        updatePath(pose);
+        // Apply pose to camera for AR view (only if not in debug mode)
+        if (!debugMode) {
+          applyPose(pose, camera.quaternion, camera.position);
+        }
+
+        // Update 3D path
+        updatePath(pose, pathLine, scene, markerConnections);
+
+        // Render the scene
+        if (debugMode) {
+          controls.update(); // Update orbit controls only in debug mode
+        }
+        renderer.render(scene, camera);
         Stats.stop('path');
       } else {
         if (frameProcessedCount % 30 === 0) {
@@ -188,44 +310,113 @@ async function extractImageDataFromFrame(frame) {
 let frameDebugCount = 0; // Add this at module level
 
 // 3. Update path visualization -----------------------------------------------
-function updatePath(pose) {
-  // pose[12], pose[13], pose[14] = X,Y,Z translation (OV²SLAM / ORB conv.)
+function updatePath(pose, pathLine, scene, markerConnections) {
+  // Extract position from pose matrix
   const x = pose[12];
-  const z = -pose[14];      // flip Z so forward = upward in SVG
-  pts.push({ x, z }); // Store as objects for easier manipulation
+  const y = pose[13];
+  const z = pose[14];
 
-  // Calculate bounding box of all points
-  const minX = Math.min(...pts.map(p => p.x));
-  const maxX = Math.max(...pts.map(p => p.x));
-  const minZ = Math.min(...pts.map(p => p.z));
-  const maxZ = Math.max(...pts.map(p => p.z));
+  pts.push(new THREE.Vector3(x, y, z));
 
-  // Add padding around the path
-  const padding = Math.max(0.1, Math.max(maxX - minX, maxZ - minZ) * 0.1);
-  const viewBoxX = minX - padding;
-  const viewBoxY = minZ - padding;
-  const viewBoxWidth = maxX - minX + 2 * padding;
-  const viewBoxHeight = maxZ - minZ + 2 * padding;
-
-  // Update SVG viewBox to fit all points
-  svg.setAttribute('viewBox', `${viewBoxX} ${viewBoxY} ${viewBoxWidth} ${viewBoxHeight}`);
-
-  // Calculate responsive stroke width based on viewBox size
-  const viewBoxDiagonal = Math.sqrt(viewBoxWidth * viewBoxWidth + viewBoxHeight * viewBoxHeight);
-  const strokeWidth = Math.max(0.005, viewBoxDiagonal * 0.003); // 0.3% of diagonal, min 0.005
-
-  if (!polyline) {
-    polyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
-    polyline.setAttribute('fill', 'none');
-    polyline.setAttribute('stroke', '#0f0');
-    svg.appendChild(polyline);
+  // Limit the number of points for performance
+  const maxPoints = 1000;
+  if (pts.length > maxPoints) {
+    pts.shift(); // Remove oldest point
   }
 
-  // Update stroke width dynamically
-  polyline.setAttribute('stroke-width', strokeWidth.toString());
+  // Dispose of old geometry and create new one to avoid buffer size warnings
+  pathLine.geometry.dispose();
+  pathLine.geometry = new THREE.BufferGeometry().setFromPoints(pts);
 
-  // Convert points back to string format for polyline
-  polyline.setAttribute('points', pts.map(p => `${p.x},${p.z}`).join(' '));
+  // Optional: Add markers at regular intervals
+  if (pts.length % 10 === 0) {
+    const markerPos = new THREE.Vector3(x, y, z);
+    markerPts.push(markerPos);
+
+    // Limit marker points to prevent excessive memory usage
+    const maxMarkers = 100;
+    if (markerPts.length > maxMarkers) {
+      markerPts.shift(); // Remove oldest marker point
+
+      // Also remove the corresponding mesh from scene and dispose of it
+      if (markerMeshes.length > 0) {
+        const oldMarker = markerMeshes.shift();
+        scene.remove(oldMarker);
+        oldMarker.geometry.dispose();
+        oldMarker.material.dispose();
+      }
+    }
+
+    const markerMesh = addPathMarker(scene, markerPos);
+    markerMeshes.push(markerMesh);
+
+    // Update marker connections with cylinders
+    updateMarkerConnections(markerConnections);
+  }
+}
+
+// Create 3D cylinder to connect two points
+function createConnectionCylinder(startPos, endPos) {
+  const distance = startPos.distanceTo(endPos);
+  const cylinderGeometry = new THREE.CylinderGeometry(0.005, 0.005, distance, 8); // Radius 0.005, 8 segments
+  const cylinderMaterial = new THREE.MeshBasicMaterial({
+    color: 0xff0000,
+    transparent: true,
+    opacity: 0.8
+  });
+  const cylinder = new THREE.Mesh(cylinderGeometry, cylinderMaterial);
+
+  // Position cylinder at midpoint between start and end
+  const midPoint = new THREE.Vector3().addVectors(startPos, endPos).multiplyScalar(0.5);
+  cylinder.position.copy(midPoint);
+
+  // Orient cylinder to point from start to end
+  const direction = new THREE.Vector3().subVectors(endPos, startPos).normalize();
+  const up = new THREE.Vector3(0, 1, 0);
+
+  // If direction is parallel to up vector, use a different reference
+  if (Math.abs(direction.dot(up)) > 0.99) {
+    up.set(1, 0, 0);
+  }
+
+  cylinder.lookAt(endPos);
+  cylinder.rotateX(Math.PI / 2); // Adjust for cylinder's default orientation
+
+  return cylinder;
+}
+
+// Update marker connections with 3D cylinders
+function updateMarkerConnections(markerConnections) {
+  // Clear existing connections
+  while (markerConnections.children.length > 0) {
+    const child = markerConnections.children[0];
+    markerConnections.remove(child);
+    if (child.geometry) child.geometry.dispose();
+    if (child.material) child.material.dispose();
+  }
+
+  // Create new connections between consecutive markers
+  for (let i = 0; i < markerPts.length - 1; i++) {
+    const startPos = markerPts[i];
+    const endPos = markerPts[i + 1];
+
+    const connectionCylinder = createConnectionCylinder(startPos, endPos);
+    markerConnections.add(connectionCylinder);
+  }
+}
+
+// Optional: Add visual markers along the path
+function addPathMarker(scene, position) {
+  const markerGeometry = new THREE.SphereGeometry(0.02, 12, 12); // Larger sphere: radius 0.02, more segments for smoother appearance
+  const markerMaterial = new THREE.MeshBasicMaterial({
+    color: 0xff0000,
+    transparent: true,
+    opacity: 0.9
+  });
+  const marker = new THREE.Mesh(markerGeometry, markerMaterial);
+  marker.position.copy(position);
+  scene.add(marker);
+  return marker; // Return the mesh for tracking
 }
 
 // iOS Permission handling and startup
@@ -294,6 +485,41 @@ function createStartButton() {
 
   return overlay;
 }
+
+// Add keyboard controls for debug mode
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'd' || event.key === 'D') {
+    debugMode = !debugMode;
+    console.log('Debug mode:', debugMode ? 'ON (OrbitControls enabled)' : 'OFF (AR tracking)');
+
+    // Show/hide debug info
+    const debugInfo = document.getElementById('debug-info');
+    if (!debugInfo) {
+      const info = document.createElement('div');
+      info.id = 'debug-info';
+      info.style.cssText = `
+        position: fixed; 
+        top: 10px; 
+        right: 10px; 
+        background: rgba(0,0,0,0.8); 
+        color: white; 
+        padding: 10px; 
+        border-radius: 5px;
+        font-family: monospace;
+        z-index: 1000;
+      `;
+      document.body.appendChild(info);
+    }
+
+    const info = document.getElementById('debug-info');
+    info.style.display = debugMode ? 'block' : 'none';
+    info.innerHTML = `
+      Debug Mode: ${debugMode ? 'ON' : 'OFF'}<br>
+      Press 'D' to toggle<br>
+      ${debugMode ? 'OrbitControls: Active<br>AR Tracking: Disabled' : 'OrbitControls: Disabled<br>AR Tracking: Active'}
+    `;
+  }
+});
 
 // App startup
 document.addEventListener('DOMContentLoaded', () => {
